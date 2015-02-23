@@ -7,6 +7,10 @@ import glob
 import re
 
 
+RETRIES_MAX = 10
+RETRY_WAIT = 5  # seconds
+
+
 def _recursive_delete(dir):
     os.system("chmod 700 -R \"%s\"" % dir)
     os.system("rm -rf \"%s\"" % dir)
@@ -35,7 +39,7 @@ class IncrementalBackup:
 
     def check_stuff(self):
         if (not os.path.isdir(self.backup_target)):
-            print self.backup_target, "doesn't exist. FAIL"
+            print("ERROR in backup of {0} to {1}: {1} does not exist.".format(self.backupOriginalLocation, self.backup_target))
             sys.exit(-1)
 
     def GetDailyTarget(self, num):
@@ -80,9 +84,19 @@ class IncrementalBackup:
             ["--exclude '{0}'".format(i) for i in self.exclude_patterns]
         )
         # update latest copy
-        cmd = "rsync -avzx %s --delete \"%s\" \"%s/\"" % (excludes, self.backupOriginalLocation, newDaily)
+        cmd = "rsync -avzxP %s --delete \"%s\" \"%s/\"" % (excludes, self.backupOriginalLocation, newDaily)
         print cmd
-        os.system(cmd)
+
+        # retry rsync command on failure
+        for i in xrange(0, RETRIES_MAX):
+            if os.system(cmd) == 0:
+                break
+            time.sleep(RETRY_WAIT)
+
+        if i == RETRIES_MAX:
+            print("FAILURE: Maximum retries ({0}) reached.".format(RETRIES_MAX))
+        else:
+            print("SUCCESS: {0} retries.".format(i))
 
     def GetMonthYear(self):
         t = time.gmtime()
@@ -115,6 +129,7 @@ class IncrementalBackup:
             os.system("cp -al \"%s\" \"%s\"" % (self.GetDailyTarget(0)[0], self.GetMonthlyTarget(year, month)))
 
     def do(self):
+        print("Starting backup of {0} to {1}".format(self.backupOriginalLocation, self.backup_target))
         if self.preCmd and (os.system(self.preCmd) != 0):
             print self.backup_target, "Error executing precommand", self.preCmd
             if self.postCmd and (os.system(self.postCmd) != 0):
